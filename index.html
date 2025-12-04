@@ -124,7 +124,7 @@
     const s = String(timeStr).trim().toUpperCase();
     // Format possibilities:
     // "HH:MM" (24h) or "H:MM AM/PM"
-    const m = s.match(/^(\\d{1,2}):(\\d{2})(?:\\s*(AM|PM))?$/i);
+    const m = s.match(/^(\d{1,2}):(\d{2})(?:\s*(AM|PM))?$/i);
     if(!m) return null;
     let h = parseInt(m[1],10);
     const mins = parseInt(m[2],10);
@@ -149,7 +149,7 @@
 
   function formatToDisplay(timeStr){
     // Convert "HH:MM" 24h to "h:mm AM/PM"
-    const m = String(timeStr || '').trim().match(/^(\\d{1,2}):(\\d{2})$/);
+    const m = String(timeStr || '').trim().match(/^(\d{1,2}):(\d{2})$/);
     if(!m){
       // maybe it's already "h:m AM"
       const mm = String(timeStr || '').trim().toUpperCase();
