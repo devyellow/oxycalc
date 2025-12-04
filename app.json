@@ -25,8 +25,9 @@
       "package": "app.rork.fqttv267do5uz39p09z9j"
     },
     "web": {
+      "basePath": "/oxycalc",
       "favicon": "./assets/images/favicon.png",
-      "basePath": "/oxycalc"
+      "publicPath": "./"
     },
     "plugins": [
       [
