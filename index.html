@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Calculadora de Oxígeno</title>
+<title>Calculadora de Oxígeno (con TimePicker)</title>
 <style>
   :root{--bg:#f8fafc;--card:#fff;--muted:#94a3b8;--accent:#0ea5a0;--danger:#d32f2f}
   body{font-family:Inter,Segoe UI,system-ui,Arial; margin:0; background:var(--bg); color:#0f172a}
@@ -35,6 +35,25 @@
     .title h1{font-size:16px}
     table{min-width:700px}
   }
+
+  /* TimePicker modal styles */
+  .tp-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;align-items:center;justify-content:center;z-index:9999}
+  .tp-backdrop.show{display:flex}
+  .tp-modal{background:#fff;border-radius:12px;padding:18px;width:92%;max-width:460px;box-shadow:0 10px 30px rgba(2,6,23,.2)}
+  .tp-title{text-align:center;font-weight:700;color:#0f172a;margin-bottom:12px}
+  .tp-pickers{display:flex;gap:8px;justify-content:space-between;margin-bottom:12px}
+  .tp-column{flex:1;max-width:33%}
+  .tp-label{font-size:12px;color:#64748B;text-align:center;margin-bottom:8px;font-weight:600}
+  .tp-scroll{max-height:160px;overflow:auto;border-radius:8px;padding:6px;background:#fafbfd}
+  .tp-option{padding:8px;border-radius:8px;margin:4px 0;text-align:center;cursor:pointer}
+  .tp-option.active{background:#7c4dff;color:#fff;font-weight:700}
+  .tp-ampm{display:flex;flex-direction:column;gap:6px;align-items:center}
+  .tp-preview{background:#F5F6FA;border-radius:10px;padding:12px;text-align:center;margin-bottom:12px}
+  .tp-buttons{display:flex;gap:10px}
+  .tp-btn{flex:1;padding:10px;border-radius:8px;cursor:pointer;border:none}
+  .tp-btn.cancel{background:#E2E8F0;color:#64748B}
+  .tp-btn.confirm{background:#9575CD;color:#fff}
+  .tp-time-display{font-size:20px;font-weight:700;color:#7c4dff}
 </style>
 </head>
 <body>
@@ -100,17 +119,48 @@
   </div>
 </div>
 
-<!-- Hidden time input used to pick times programmatically -->
-<input type="time" id="hiddenTimePicker" style="position:fixed;left:-9999px;top:-9999px" />
+<!-- TimePicker modal -->
+<div id="tpBackdrop" class="tp-backdrop" role="dialog" aria-modal="true" aria-hidden="true">
+  <div class="tp-modal" role="document" aria-labelledby="tpTitle">
+    <div id="tpTitle" class="tp-title">Seleccionar Hora</div>
+    <div class="tp-pickers">
+      <div class="tp-column">
+        <div class="tp-label">Hora</div>
+        <div id="tpHours" class="tp-scroll"></div>
+      </div>
+      <div class="tp-column">
+        <div class="tp-label">Minuto</div>
+        <div id="tpMinutes" class="tp-scroll"></div>
+      </div>
+      <div class="tp-column">
+        <div class="tp-label">AM / PM</div>
+        <div class="tp-ampm">
+          <button id="tpAM" class="tp-option">AM</button>
+          <button id="tpPM" class="tp-option">PM</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="tp-preview">
+      <div class="tp-time-display" id="tpPreviewTime">12:00 AM</div>
+    </div>
+
+    <div style="display:flex;gap:10px">
+      <button class="tp-btn cancel" id="tpCancel">Cancelar</button>
+      <button class="tp-btn confirm" id="tpConfirm">Confirmar</button>
+    </div>
+  </div>
+</div>
 
 <script>
 (function(){
-  // Config inicial
+
+  /* ---------- Config y estado ---------- */
   const INITIAL_ROWS = 20;
   let insuranceType = 'contributivo';
   let paymentFactor = 0.45;
 
-  // Estado: array de objetos {id, startTime, endTime, flowRate}
+  // Estado de entradas: guardamos startTime/endTime en "HH:MM" (24h) strings
   let entries = Array.from({length: INITIAL_ROWS}, (_,i)=>({
     id: 'entry-' + i,
     startTime: '',
@@ -118,24 +168,32 @@
     flowRate: ''
   }));
 
-  // Helpers de tiempo
+  // TimePicker state
+  let tpVisible = false;
+  let tpCurrent = null; // { entryId, field }
+  let tpHour = 12;
+  let tpMinute = 0;
+  let tpAmpm = 'AM';
+
+  /* ---------- Helpers de tiempo ---------- */
+  function pad(n){ return String(n).padStart(2,'0'); }
+
   function parseTimeToMinutes(timeStr){
     if(!timeStr) return null;
     const s = String(timeStr).trim().toUpperCase();
-    // Format possibilities:
-    // "HH:MM" (24h) or "H:MM AM/PM"
+    // Match "H:MM AM/PM" or "HH:MM"
     const m = s.match(/^(\d{1,2}):(\d{2})(?:\s*(AM|PM))?$/i);
     if(!m) return null;
-    let h = parseInt(m[1],10);
-    const mins = parseInt(m[2],10);
+    let hours = parseInt(m[1],10);
+    const minutes = parseInt(m[2],10);
     const ampm = m[3];
-    if(isNaN(h) || isNaN(mins)) return null;
+    if(isNaN(hours) || isNaN(minutes)) return null;
     if(ampm){
-      if(ampm === 'PM' && h < 12) h += 12;
-      if(ampm === 'AM' && h === 12) h = 0;
+      if(ampm === 'PM' && hours < 12) hours += 12;
+      if(ampm === 'AM' && hours === 12) hours = 0;
     }
-    if(h < 0 || h > 23 || mins < 0 || mins > 59) return null;
-    return h * 60 + mins;
+    if(hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return null;
+    return hours * 60 + minutes;
   }
 
   function minutesDiff(startStr, endStr){
@@ -148,14 +206,10 @@
   }
 
   function formatToDisplay(timeStr){
-    // Convert "HH:MM" 24h to "h:mm AM/PM"
-    const m = String(timeStr || '').trim().match(/^(\d{1,2}):(\d{2})$/);
-    if(!m){
-      // maybe it's already "h:m AM"
-      const mm = String(timeStr || '').trim().toUpperCase();
-      if(mm.match(/AM|PM/)) return mm;
-      return '';
-    }
+    if(!timeStr) return '';
+    // timeStr expected "HH:MM"
+    const m = String(timeStr).trim().match(/^(\d{1,2}):(\d{2})$/);
+    if(!m) return timeStr;
     let h = parseInt(m[1],10);
     const mins = m[2];
     const ampm = h >= 12 ? 'PM' : 'AM';
@@ -165,13 +219,10 @@
   }
 
   function formatTimeValueForInput(timeStr){
-    // Ensure "HH:MM" for input[type=time] (24h, padded)
-    // Accept "h:mm AM/PM" also
     if(!timeStr) return '';
-    const ampmMatch = timeStr.match(/(AM|PM)$/i);
+    const ampmMatch = timeStr.toString().match(/(AM|PM)$/i);
     if(ampmMatch){
-      // Parse and convert to 24h
-      const part = timeStr.replace(/\\s*(AM|PM)$/i,'').trim();
+      const part = timeStr.replace(/\s*(AM|PM)$/i,'').trim();
       const p = part.split(':');
       let h = parseInt(p[0],10);
       const mins = (p[1] || '00').padStart(2,'0');
@@ -180,7 +231,7 @@
       if(ap === 'AM' && h === 12) h = 0;
       return String(h).padStart(2,'0') + ':' + mins;
     }
-    // assume HH:MM or H:MM
+    // assume HH:MM
     const parts = timeStr.split(':');
     if(parts.length >= 2){
       const h = String(parts[0]).padStart(2,'0');
@@ -190,34 +241,48 @@
     return '';
   }
 
-  // Cost calculation
-  function calculateCostForEntry(entry){
-    const mins = minutesDiff(entry.startTime, entry.endTime);
-    const flow = parseFloat(entry.flowRate) || 0;
-    // cost = minutes * flow * factor
-    return mins * flow * paymentFactor;
+  function hhmmToParts(hhmm){
+    // returns {hour12, minute, ampm}
+    if(!hhmm) return {hour12:12, minute:0, ampm:'AM'};
+    const m = hhmm.match(/^(\d{1,2}):(\d{2})$/);
+    if(!m) return {hour12:12, minute:0, ampm:'AM'};
+    let h = parseInt(m[1],10);
+    const minute = parseInt(m[2],10);
+    const ampm = h >= 12 ? 'PM' : 'AM';
+    let h12 = h % 12;
+    if(h12 === 0) h12 = 12;
+    return { hour12: h12, minute, ampm };
   }
 
-  function calculateTotal(){
-    return entries.reduce((sum, e) => sum + calculateCostForEntry(e), 0);
+  function partsToHHMM(hour12, minute, ampm){
+    let h = hour12;
+    if(ampm === 'PM' && h < 12) h += 12;
+    if(ampm === 'AM' && h === 12) h = 0;
+    return pad(h) + ':' + pad(minute);
   }
 
-  // DOM
+  /* ---------- DOM refs ---------- */
   const tbody = document.getElementById('tbodyEntries');
   const totalAmountEl = document.getElementById('totalAmount');
   const factorLabel = document.getElementById('factorLabel');
-  const hiddenTime = document.getElementById('hiddenTimePicker');
+  const tpBackdrop = document.getElementById('tpBackdrop');
+  const tpHoursEl = document.getElementById('tpHours');
+  const tpMinutesEl = document.getElementById('tpMinutes');
+  const tpAMBtn = document.getElementById('tpAM');
+  const tpPMBtn = document.getElementById('tpPM');
+  const tpPreviewTime = document.getElementById('tpPreviewTime');
+  const tpCancel = document.getElementById('tpCancel');
+  const tpConfirm = document.getElementById('tpConfirm');
 
+  /* ---------- Renderers ---------- */
   function render(){
     tbody.innerHTML = '';
     entries.forEach((entry, idx) => {
       const tr = document.createElement('tr');
 
-      // number
       const tdNum = document.createElement('td'); tdNum.className='num'; tdNum.textContent = (idx+1);
       tr.appendChild(tdNum);
 
-      // start
       const tdStart = document.createElement('td');
       tdStart.className = 'time-cell';
       tdStart.title = "Click para seleccionar hora";
@@ -226,7 +291,6 @@
       tdStart.textContent = entry.startTime ? formatToDisplay(formatTimeValueForInput(entry.startTime)) : 'HH:MM';
       tr.appendChild(tdStart);
 
-      // end
       const tdEnd = document.createElement('td');
       tdEnd.className = 'time-cell';
       tdEnd.dataset.entryId = entry.id;
@@ -235,7 +299,6 @@
       tdEnd.textContent = entry.endTime ? formatToDisplay(formatTimeValueForInput(entry.endTime)) : 'HH:MM';
       tr.appendChild(tdEnd);
 
-      // flow
       const tdFlow = document.createElement('td');
       tdFlow.className = 'small';
       const flowInput = document.createElement('input');
@@ -250,21 +313,18 @@
       tdFlow.appendChild(flowInput);
       tr.appendChild(tdFlow);
 
-      // minutes
       const tdMin = document.createElement('td');
       tdMin.className = 'small';
       const mins = minutesDiff(entry.startTime, entry.endTime);
       tdMin.textContent = mins > 0 ? String(mins) : '-';
       tr.appendChild(tdMin);
 
-      // cost
       const tdCost = document.createElement('td');
       tdCost.className = 'small';
       const cost = calculateCostForEntry(entry);
       tdCost.textContent = cost > 0 ? cost.toFixed(2) : '-';
       tr.appendChild(tdCost);
 
-      // delete
       const tdDel = document.createElement('td');
       tdDel.style.textAlign = 'center';
       const delBtn = document.createElement('button');
@@ -277,7 +337,6 @@
 
       tbody.appendChild(tr);
 
-      // Click handlers to open time picker
       tdStart.addEventListener('click', ()=> openTimePicker(entry.id, 'startTime', entry.startTime));
       tdEnd.addEventListener('click', ()=> openTimePicker(entry.id, 'endTime', entry.endTime));
     });
@@ -286,15 +345,9 @@
     factorLabel.textContent = paymentFactor + ' (' + insuranceType + ')';
   }
 
-  // Update logic (keeps immutability-like behaviour)
+  /* ---------- Lógica de CRUD ---------- */
   function updateEntry(id, field, value){
-    entries = entries.map((e, i) => {
-      if(e.id !== id) return e;
-      const copy = {...e, [field]: value};
-      return copy;
-    });
-
-    // If field is endTime, copy to next startTime when next exists and startTime empty
+    entries = entries.map((e) => e.id === id ? {...e, [field]: value} : e);
     if(field === 'endTime'){
       const idx = entries.findIndex(e => e.id === id);
       if(idx !== -1 && idx + 1 < entries.length){
@@ -304,7 +357,6 @@
         }
       }
     }
-
     render();
   }
 
@@ -318,53 +370,105 @@
     const newEntry = { id: 'entry-' + Date.now(), startTime:'', endTime:'', flowRate:''};
     entries.push(newEntry);
     render();
-    // scroll to bottom
     window.requestAnimationFrame(()=> {
       const last = tbody.lastElementChild;
       if(last) last.scrollIntoView({behavior:'smooth', block:'end'});
     });
   }
 
-  // Time picker behavior: use a hidden <input type=time>, click it programmatically and then capture value
-  let currentPicker = null; // {entryId, field}
-  function openTimePicker(entryId, field, currentVal){
-    currentPicker = {entryId, field};
-    hiddenTime.value = formatTimeValueForInput(currentVal) || '';
-    hiddenTime.focus();
-    // Programmatically open picker (works on most mobile/desktop)
-    hiddenTime.click();
+  /* ---------- Cálculos ---------- */
+  function calculateCostForEntry(entry){
+    const mins = minutesDiff(entry.startTime, entry.endTime);
+    const flow = parseFloat(entry.flowRate) || 0;
+    return mins * flow * paymentFactor;
   }
 
-  hiddenTime.addEventListener('change', (ev) => {
-    if(!currentPicker) return;
-    const val = ev.target.value; // in "HH:MM" 24h
-    // Update entry storing the HH:MM string
-    updateEntry(currentPicker.entryId, currentPicker.field, val);
-    // reset
-    currentPicker = null;
-    // Clear input to allow re-open same time
-    hiddenTime.value = '';
-  });
+  function calculateTotal(){
+    return entries.reduce((sum, e) => sum + calculateCostForEntry(e), 0);
+  }
 
-  // Insurance buttons
-  document.getElementById('btnContri').addEventListener('click', ()=> {
-    insuranceType = 'contributivo'; paymentFactor = 0.45;
-    document.getElementById('btnContri').classList.add('btn--active'); document.getElementById('btnContri').classList.remove('btn--muted');
-    document.getElementById('btnSubs').classList.remove('btn--active'); document.getElementById('btnSubs').classList.add('btn--muted');
-    render();
-  });
-  document.getElementById('btnSubs').addEventListener('click', ()=> {
-    insuranceType = 'subsidiado'; paymentFactor = 0.25;
-    document.getElementById('btnSubs').classList.add('btn--active'); document.getElementById('btnSubs').classList.remove('btn--muted');
-    document.getElementById('btnContri').classList.remove('btn--active'); document.getElementById('btnContri').classList.add('btn--muted');
-    render();
-  });
+  /* ---------- TimePicker UI logic ---------- */
+  // Construir horas/minutos
+  function buildTpOptions(){
+    tpHoursEl.innerHTML = '';
+    for(let h=1; h<=12; h++){
+      const btn = document.createElement('div');
+      btn.className = 'tp-option';
+      btn.textContent = String(h).padStart(2,'0');
+      btn.dataset.hour = String(h);
+      btn.addEventListener('click', ()=> {
+        tpHour = parseInt(btn.dataset.hour,10);
+        syncTpSelection();
+      });
+      tpHoursEl.appendChild(btn);
+    }
 
-  // Add row
-  document.getElementById('addRowBtn').addEventListener('click', addEntry);
+    tpMinutesEl.innerHTML = '';
+    for(let m=0; m<60; m++){
+      const btn = document.createElement('div');
+      btn.className = 'tp-option';
+      btn.textContent = String(m).padStart(2,'0');
+      btn.dataset.minute = String(m);
+      btn.addEventListener('click', ()=> {
+        tpMinute = parseInt(btn.dataset.minute,10);
+        syncTpSelection();
+      });
+      tpMinutesEl.appendChild(btn);
+    }
 
-  // Share via WhatsApp
-  document.getElementById('shareBtn').addEventListener('click', async ()=> {
+    tpAMBtn.addEventListener('click', ()=> { tpAmpm = 'AM'; syncTpSelection(); });
+    tpPMBtn.addEventListener('click', ()=> { tpAmpm = 'PM'; syncTpSelection(); });
+
+    tpCancel.addEventListener('click', closeTimePicker);
+    tpConfirm.addEventListener('click', confirmTimePicker);
+  }
+
+  function openTimePicker(entryId, field, currentValue){
+    tpCurrent = { entryId, field };
+    // Initialize picker from currentValue
+    const parts = hhmmToParts(formatTimeValueForInput(currentValue || ''));
+    tpHour = parts.hour12;
+    tpMinute = parts.minute;
+    tpAmpm = parts.ampm;
+    tpBackdrop.classList.add('show');
+    tpBackdrop.setAttribute('aria-hidden','false');
+    syncTpSelection();
+    // focus first option for accessibility
+    setTimeout(()=> {
+      const el = tpHoursEl.querySelector('.tp-option');
+      if(el) el.focus();
+    }, 100);
+  }
+
+  function closeTimePicker(){
+    tpBackdrop.classList.remove('show');
+    tpBackdrop.setAttribute('aria-hidden','true');
+    tpCurrent = null;
+  }
+
+  function syncTpSelection(){
+    // update classes
+    Array.from(tpHoursEl.children).forEach(el => {
+      if(parseInt(el.dataset.hour,10) === tpHour) el.classList.add('active'); else el.classList.remove('active');
+    });
+    Array.from(tpMinutesEl.children).forEach(el => {
+      if(parseInt(el.dataset.minute,10) === tpMinute) el.classList.add('active'); else el.classList.remove('active');
+    });
+    tpAMBtn.classList.toggle('active', tpAmpm === 'AM');
+    tpPMBtn.classList.toggle('active', tpAmpm === 'PM');
+
+    tpPreviewTime.textContent = pad(tpHour) + ':' + pad(tpMinute) + ' ' + tpAmpm;
+  }
+
+  function confirmTimePicker(){
+    if(!tpCurrent) return closeTimePicker();
+    const hhmm = partsToHHMM(tpHour, tpMinute, tpAmpm); // "HH:MM" 24h
+    updateEntry(tpCurrent.entryId, tpCurrent.field, hhmm);
+    closeTimePicker();
+  }
+
+  /* ---------- Share ---------- */
+  function buildShareMessage(){
     const lines = [];
     lines.push('Registro de suministros de oxígeno');
     lines.push('');
@@ -379,65 +483,57 @@
       const flow = entry.flowRate || '-';
       const costStr = cost > 0 ? cost.toFixed(2) : '-';
       lines.push(`${i+1} | ${inicio} | ${fin} | ${flow} | ${mins} | ${costStr}`);
-
     });
     lines.push('');
-    lines.push('Total a Pagar: $' + calculateTotal().toFixed(2));
-    lines.push('Factor aplicado: ' + paymentFactor + ' (' + insuranceType + ')');
-    const message = lines.join('\\n');
+    lines.push(`Total a Pagar: $${calculateTotal().toFixed(2)}`);
+    lines.push(`Factor aplicado: ${paymentFactor} (${insuranceType})`);
+    return lines.join('\n');
+  }
 
-    // Try to open WhatsApp web
+  async function shareViaWhatsApp(){
+    const message = buildShareMessage();
     const waUrl = 'https://wa.me/?text=' + encodeURIComponent(message);
-    // On browsers we can open waUrl in new tab. But prefer navigator.share if available.
     try{
       if (navigator.share) {
         await navigator.share({text: message, title: 'Registro de oxígeno'});
         return;
       }
-    }catch(e){
-      // fallback
-    }
-
-    // Attempt to open WhatsApp web
+    }catch(e){}
     window.open(waUrl, '_blank');
-
-    // Also copy to clipboard and inform
-    try{
-      await navigator.clipboard.writeText(message);
-      alert('Mensaje copiado al portapapeles. Puedes pegarlo en WhatsApp si no abre automáticamente.');
-    }catch(e){
-      // ignore
-    }
-  });
-
-  // Utility: updateEntry via id
-  function updateEntryByIndex(index, field, value){
-    if(index < 0 || index >= entries.length) return;
-    const id = entries[index].id;
-    updateEntry(id, field, value);
+    try{ await navigator.clipboard.writeText(message); alert('Mensaje copiado al portapapeles. Puedes pegarlo en WhatsApp si no abre automáticamente.'); }catch(e){}
   }
 
-  // Allow manual text paste in time cells: double-click to edit raw text (optional)
-  tbody.addEventListener('dblclick', function(ev){
-    const t = ev.target;
-    if(t.classList.contains('time-cell')){
-      const entryId = t.dataset.entryId;
-      const field = t.dataset.field;
-      // prompt for a time string (accept "7:30 AM" or "14:30")
-      const current = entries.find(e=>e.id===entryId)?.[field] || '';
-      const user = prompt('Ingresar hora (ej: 7:30 AM o 14:30):', current ? formatToDisplay(formatTimeValueForInput(current)) : '');
-      if(user !== null){
-        // Attempt to parse user; if contains AM/PM, convert; if HH:MM, store as HH:MM
-        const valForInput = formatTimeValueForInput(user) || user;
-        updateEntry(entryId, field, valForInput || '');
-      }
-    }
+  /* ---------- Inicialización UI ---------- */
+  document.getElementById('btnContri').addEventListener('click', ()=> {
+    insuranceType = 'contributivo'; paymentFactor = 0.45;
+    document.getElementById('btnContri').classList.add('btn--active'); document.getElementById('btnContri').classList.remove('btn--muted');
+    document.getElementById('btnSubs').classList.remove('btn--active'); document.getElementById('btnSubs').classList.add('btn--muted');
+    render();
   });
+  document.getElementById('btnSubs').addEventListener('click', ()=> {
+    insuranceType = 'subsidiado'; paymentFactor = 0.25;
+    document.getElementById('btnSubs').classList.add('btn--active'); document.getElementById('btnSubs').classList.remove('btn--muted');
+    document.getElementById('btnContri').classList.remove('btn--active'); document.getElementById('btnContri').classList.add('btn--muted');
+    render();
+  });
+  document.getElementById('addRowBtn').addEventListener('click', addEntry);
+  document.getElementById('shareBtn').addEventListener('click', shareViaWhatsApp);
 
-  // Initial render
+  // build timepicker options and render initial UI
+  buildTpOptions();
   render();
 
-  // Expose for debugging (opcional)
+  // Close modal on ESC
+  window.addEventListener('keydown', (ev)=> {
+    if(ev.key === 'Escape' && tpBackdrop.classList.contains('show')) closeTimePicker();
+  });
+
+  // Accessibility: click outside to close (backdrop)
+  tpBackdrop.addEventListener('click', (ev)=> {
+    if(ev.target === tpBackdrop) closeTimePicker();
+  });
+
+  // expose for debug
   window.__oxygenCalc = { getEntries: ()=> entries, setEntries: (v)=> { entries = v; render(); } };
 
 })();
