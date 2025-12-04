@@ -378,7 +378,8 @@
       const fin = entry.endTime ? formatToDisplay(formatTimeValueForInput(entry.endTime)) : '-';
       const flow = entry.flowRate || '-';
       const costStr = cost > 0 ? cost.toFixed(2) : '-';
-      lines.push(\\`\${i+1} | \${inicio} | \${fin} | \${flow} | \${mins} | \${costStr}\\`);
+      lines.push(`${i+1} | ${inicio} | ${fin} | ${flow} | ${mins} | ${costStr}`);
+
     });
     lines.push('');
     lines.push('Total a Pagar: $' + calculateTotal().toFixed(2));
