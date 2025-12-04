@@ -1,37 +1,445 @@
-<!DOCTYPE html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta httpEquiv="X-UA-Compatible" content="IE=edge" />
-    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
-    <title>OxyCal</title>
-    <!-- The `react-native-web` recommended style reset: https://necolas.github.io/react-native-web/docs/setup/#root-element -->
-    <style id="expo-reset">
-      /* These styles make the body full-height */
-      html,
-      body {
-        height: 100%;
-      }
-      /* These styles disable body scrolling if you are using <ScrollView> */
-      body {
-        overflow: hidden;
-      }
-      /* These styles make the root element full-height */
-      #root {
-        display: flex;
-        height: 100%;
-        flex: 1;
-      }
-    </style>
-  <link rel="icon" href="/favicon.ico" /></head>
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Calculadora de Oxígeno</title>
+<style>
+  :root{--bg:#f8fafc;--card:#fff;--muted:#94a3b8;--accent:#0ea5a0;--danger:#d32f2f}
+  body{font-family:Inter,Segoe UI,system-ui,Arial; margin:0; background:var(--bg); color:#0f172a}
+  header{background:linear-gradient(90deg,#0ea5a0,#06b6d4); color:#fff; padding:18px 16px}
+  .container{max-width:1100px;margin:20px auto;padding:16px}
+  .title{display:flex;align-items:center;gap:12px}
+  .title h1{margin:0;font-size:20px}
+  .subtitle{opacity:.9;margin-top:6px;font-size:13px}
+  .card{background:var(--card);border-radius:10px;padding:12px;box-shadow:0 6px 18px rgba(2,6,23,.06);margin-top:16px}
+  .insurance{display:flex;gap:8px;margin-top:8px}
+  .btn{padding:8px 12px;border-radius:8px;border:1px solid transparent;cursor:pointer;display:inline-flex;gap:8px;align-items:center}
+  .btn--muted{background:#f1f5f9;color:#0f172a;border-color:transparent}
+  .btn--active{background:#064e3b;color:#fff;border-color:rgba(255,255,255,.06)}
+  .table-scroll{overflow:auto;margin-top:12px}
+  table{border-collapse:collapse;width:100%;min-width:820px}
+  th,td{padding:8px 10px;text-align:left;border-bottom:1px solid #eef2f6;font-size:14px}
+  th{background:#f8fafc;color:#334155}
+  .num{width:36px;text-align:center}
+  .time-cell{width:120px; text-align:center; cursor:pointer; color:var(--muted)}
+  input[type="text"], input[type="number"]{width:100%;padding:6px;border-radius:6px;border:1px solid #e6eef6;background:#fafbfd}
+  .small{width:80px;text-align:center}
+  .actions{display:flex;gap:8px;align-items:center}
+  .add-btn{background:#0ea5a0;color:#fff;padding:8px 10px;border-radius:8px;cursor:pointer;border:none}
+  .delete-btn{background:transparent;border:none;color:var(--danger);cursor:pointer}
+  .total{display:flex;align-items:center;justify-content:space-between;margin-top:12px}
+  .share-btn{background:#128c7e;color:#fff;border:none;padding:8px 12px;border-radius:8px;cursor:pointer}
+  .muted{color:var(--muted);font-size:13px}
+  @media (max-width:720px){
+    .title h1{font-size:16px}
+    table{min-width:700px}
+  }
+</style>
+</head>
+<body>
+<header>
+  <div style="max-width:1100px;margin:0 auto">
+    <div class="title">
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="none"><path d="M3 13h4v8H3zM9 3h4v18H9zM15 7h4v14h-4z" fill="#fff"/></svg>
+      <div>
+        <h1>Calculadora de Oxígeno</h1>
+        <div class="subtitle">Cálculo de costo por suministro</div>
+      </div>
+    </div>
+  </div>
+</header>
 
-  <body>
-    <!-- Use static rendering with Expo Router to support running without JavaScript. -->
-    <noscript>
-      You need to enable JavaScript to run this app.
-    </noscript>
-    <!-- The root element for your Expo app. -->
-    <div id="root"></div>
-  <script src="./expo/static/js/web/entry-d88c337501b47e664c6382cf8d5d6d1a.js" defer></script>
+<div class="container">
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <div>
+        <strong>Tipo de Seguro</strong>
+        <div class="insurance" id="insuranceButtons">
+          <button class="btn btn--active" data-type="contributivo" id="btnContri">
+            Contributivo <span style="margin-left:8px;opacity:.9">Factor 0.45</span>
+          </button>
+          <button class="btn btn--muted" data-type="subsidiado" id="btnSubs">
+            Subsidiado <span style="margin-left:8px;opacity:.9">Factor 0.25</span>
+          </button>
+        </div>
+      </div>
+      <div style="text-align:right">
+        <div class="muted">Factor aplicado: <span id="factorLabel">0.45 (contributivo)</span></div>
+        <button class="add-btn" id="addRowBtn" title="Agregar fila">➕ Agregar</button>
+      </div>
+    </div>
+
+    <div class="table-scroll">
+      <table id="entriesTable" aria-live="polite">
+        <thead>
+          <tr>
+            <th class="num">#</th>
+            <th style="width:110px">Inicio</th>
+            <th style="width:110px">Fin</th>
+            <th style="width:80px">L/min</th>
+            <th style="width:80px">Min</th>
+            <th style="width:100px">Costo</th>
+            <th style="width:40px"></th>
+          </tr>
+        </thead>
+        <tbody id="tbodyEntries"></tbody>
+      </table>
+    </div>
+
+    <div class="total">
+      <div>
+        <div class="muted">Total a Pagar</div>
+        <div style="font-size:20px;font-weight:600">$<span id="totalAmount">0.00</span></div>
+      </div>
+      <div style="text-align:right">
+        <button class="share-btn" id="shareBtn">Compartir por WhatsApp</button>
+        <div class="muted" style="margin-top:6px">Formato de hora visual: 12h (AM/PM)</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Hidden time input used to pick times programmatically -->
+<input type="time" id="hiddenTimePicker" style="position:fixed;left:-9999px;top:-9999px" />
+
+<script>
+(function(){
+  // Config inicial
+  const INITIAL_ROWS = 20;
+  let insuranceType = 'contributivo';
+  let paymentFactor = 0.45;
+
+  // Estado: array de objetos {id, startTime, endTime, flowRate}
+  let entries = Array.from({length: INITIAL_ROWS}, (_,i)=>({
+    id: 'entry-' + i,
+    startTime: '',
+    endTime: '',
+    flowRate: ''
+  }));
+
+  // Helpers de tiempo
+  function parseTimeToMinutes(timeStr){
+    if(!timeStr) return null;
+    const s = String(timeStr).trim().toUpperCase();
+    // Format possibilities:
+    // "HH:MM" (24h) or "H:MM AM/PM"
+    const m = s.match(/^(\\d{1,2}):(\\d{2})(?:\\s*(AM|PM))?$/i);
+    if(!m) return null;
+    let h = parseInt(m[1],10);
+    const mins = parseInt(m[2],10);
+    const ampm = m[3];
+    if(isNaN(h) || isNaN(mins)) return null;
+    if(ampm){
+      if(ampm === 'PM' && h < 12) h += 12;
+      if(ampm === 'AM' && h === 12) h = 0;
+    }
+    if(h < 0 || h > 23 || mins < 0 || mins > 59) return null;
+    return h * 60 + mins;
+  }
+
+  function minutesDiff(startStr, endStr){
+    const s = parseTimeToMinutes(startStr);
+    const e = parseTimeToMinutes(endStr);
+    if(s === null || e === null) return 0;
+    let diff = e - s;
+    if(diff < 0) diff += 24*60;
+    return diff;
+  }
+
+  function formatToDisplay(timeStr){
+    // Convert "HH:MM" 24h to "h:mm AM/PM"
+    const m = String(timeStr || '').trim().match(/^(\\d{1,2}):(\\d{2})$/);
+    if(!m){
+      // maybe it's already "h:m AM"
+      const mm = String(timeStr || '').trim().toUpperCase();
+      if(mm.match(/AM|PM/)) return mm;
+      return '';
+    }
+    let h = parseInt(m[1],10);
+    const mins = m[2];
+    const ampm = h >= 12 ? 'PM' : 'AM';
+    let h12 = h % 12;
+    if(h12 === 0) h12 = 12;
+    return h12 + ':' + mins + ' ' + ampm;
+  }
+
+  function formatTimeValueForInput(timeStr){
+    // Ensure "HH:MM" for input[type=time] (24h, padded)
+    // Accept "h:mm AM/PM" also
+    if(!timeStr) return '';
+    const ampmMatch = timeStr.match(/(AM|PM)$/i);
+    if(ampmMatch){
+      // Parse and convert to 24h
+      const part = timeStr.replace(/\\s*(AM|PM)$/i,'').trim();
+      const p = part.split(':');
+      let h = parseInt(p[0],10);
+      const mins = (p[1] || '00').padStart(2,'0');
+      const ap = ampmMatch[1].toUpperCase();
+      if(ap === 'PM' && h < 12) h += 12;
+      if(ap === 'AM' && h === 12) h = 0;
+      return String(h).padStart(2,'0') + ':' + mins;
+    }
+    // assume HH:MM or H:MM
+    const parts = timeStr.split(':');
+    if(parts.length >= 2){
+      const h = String(parts[0]).padStart(2,'0');
+      const m = String(parts[1]).slice(0,2).padStart(2,'0');
+      return h + ':' + m;
+    }
+    return '';
+  }
+
+  // Cost calculation
+  function calculateCostForEntry(entry){
+    const mins = minutesDiff(entry.startTime, entry.endTime);
+    const flow = parseFloat(entry.flowRate) || 0;
+    // cost = minutes * flow * factor
+    return mins * flow * paymentFactor;
+  }
+
+  function calculateTotal(){
+    return entries.reduce((sum, e) => sum + calculateCostForEntry(e), 0);
+  }
+
+  // DOM
+  const tbody = document.getElementById('tbodyEntries');
+  const totalAmountEl = document.getElementById('totalAmount');
+  const factorLabel = document.getElementById('factorLabel');
+  const hiddenTime = document.getElementById('hiddenTimePicker');
+
+  function render(){
+    tbody.innerHTML = '';
+    entries.forEach((entry, idx) => {
+      const tr = document.createElement('tr');
+
+      // number
+      const tdNum = document.createElement('td'); tdNum.className='num'; tdNum.textContent = (idx+1);
+      tr.appendChild(tdNum);
+
+      // start
+      const tdStart = document.createElement('td');
+      tdStart.className = 'time-cell';
+      tdStart.title = "Click para seleccionar hora";
+      tdStart.dataset.entryId = entry.id;
+      tdStart.dataset.field = 'startTime';
+      tdStart.textContent = entry.startTime ? formatToDisplay(formatTimeValueForInput(entry.startTime)) : 'HH:MM';
+      tr.appendChild(tdStart);
+
+      // end
+      const tdEnd = document.createElement('td');
+      tdEnd.className = 'time-cell';
+      tdEnd.dataset.entryId = entry.id;
+      tdEnd.dataset.field = 'endTime';
+      tdEnd.title = "Click para seleccionar hora";
+      tdEnd.textContent = entry.endTime ? formatToDisplay(formatTimeValueForInput(entry.endTime)) : 'HH:MM';
+      tr.appendChild(tdEnd);
+
+      // flow
+      const tdFlow = document.createElement('td');
+      tdFlow.className = 'small';
+      const flowInput = document.createElement('input');
+      flowInput.type = 'number';
+      flowInput.step = '0.1';
+      flowInput.min = '0';
+      flowInput.value = entry.flowRate;
+      flowInput.placeholder = '0.0';
+      flowInput.addEventListener('input', (ev)=> {
+        updateEntry(entry.id, 'flowRate', ev.target.value);
+      });
+      tdFlow.appendChild(flowInput);
+      tr.appendChild(tdFlow);
+
+      // minutes
+      const tdMin = document.createElement('td');
+      tdMin.className = 'small';
+      const mins = minutesDiff(entry.startTime, entry.endTime);
+      tdMin.textContent = mins > 0 ? String(mins) : '-';
+      tr.appendChild(tdMin);
+
+      // cost
+      const tdCost = document.createElement('td');
+      tdCost.className = 'small';
+      const cost = calculateCostForEntry(entry);
+      tdCost.textContent = cost > 0 ? cost.toFixed(2) : '-';
+      tr.appendChild(tdCost);
+
+      // delete
+      const tdDel = document.createElement('td');
+      tdDel.style.textAlign = 'center';
+      const delBtn = document.createElement('button');
+      delBtn.className = 'delete-btn';
+      delBtn.innerHTML = '🗑️';
+      delBtn.title = 'Eliminar';
+      delBtn.addEventListener('click', ()=> removeEntry(entry.id));
+      tdDel.appendChild(delBtn);
+      tr.appendChild(tdDel);
+
+      tbody.appendChild(tr);
+
+      // Click handlers to open time picker
+      tdStart.addEventListener('click', ()=> openTimePicker(entry.id, 'startTime', entry.startTime));
+      tdEnd.addEventListener('click', ()=> openTimePicker(entry.id, 'endTime', entry.endTime));
+    });
+
+    totalAmountEl.textContent = calculateTotal().toFixed(2);
+    factorLabel.textContent = paymentFactor + ' (' + insuranceType + ')';
+  }
+
+  // Update logic (keeps immutability-like behaviour)
+  function updateEntry(id, field, value){
+    entries = entries.map((e, i) => {
+      if(e.id !== id) return e;
+      const copy = {...e, [field]: value};
+      return copy;
+    });
+
+    // If field is endTime, copy to next startTime when next exists and startTime empty
+    if(field === 'endTime'){
+      const idx = entries.findIndex(e => e.id === id);
+      if(idx !== -1 && idx + 1 < entries.length){
+        const next = entries[idx+1];
+        if(!next.startTime){
+          entries[idx+1] = {...next, startTime: value};
+        }
+      }
+    }
+
+    render();
+  }
+
+  function removeEntry(id){
+    if(entries.length <= 1) return;
+    entries = entries.filter(e => e.id !== id);
+    render();
+  }
+
+  function addEntry(){
+    const newEntry = { id: 'entry-' + Date.now(), startTime:'', endTime:'', flowRate:''};
+    entries.push(newEntry);
+    render();
+    // scroll to bottom
+    window.requestAnimationFrame(()=> {
+      const last = tbody.lastElementChild;
+      if(last) last.scrollIntoView({behavior:'smooth', block:'end'});
+    });
+  }
+
+  // Time picker behavior: use a hidden <input type=time>, click it programmatically and then capture value
+  let currentPicker = null; // {entryId, field}
+  function openTimePicker(entryId, field, currentVal){
+    currentPicker = {entryId, field};
+    hiddenTime.value = formatTimeValueForInput(currentVal) || '';
+    hiddenTime.focus();
+    // Programmatically open picker (works on most mobile/desktop)
+    hiddenTime.click();
+  }
+
+  hiddenTime.addEventListener('change', (ev) => {
+    if(!currentPicker) return;
+    const val = ev.target.value; // in "HH:MM" 24h
+    // Update entry storing the HH:MM string
+    updateEntry(currentPicker.entryId, currentPicker.field, val);
+    // reset
+    currentPicker = null;
+    // Clear input to allow re-open same time
+    hiddenTime.value = '';
+  });
+
+  // Insurance buttons
+  document.getElementById('btnContri').addEventListener('click', ()=> {
+    insuranceType = 'contributivo'; paymentFactor = 0.45;
+    document.getElementById('btnContri').classList.add('btn--active'); document.getElementById('btnContri').classList.remove('btn--muted');
+    document.getElementById('btnSubs').classList.remove('btn--active'); document.getElementById('btnSubs').classList.add('btn--muted');
+    render();
+  });
+  document.getElementById('btnSubs').addEventListener('click', ()=> {
+    insuranceType = 'subsidiado'; paymentFactor = 0.25;
+    document.getElementById('btnSubs').classList.add('btn--active'); document.getElementById('btnSubs').classList.remove('btn--muted');
+    document.getElementById('btnContri').classList.remove('btn--active'); document.getElementById('btnContri').classList.add('btn--muted');
+    render();
+  });
+
+  // Add row
+  document.getElementById('addRowBtn').addEventListener('click', addEntry);
+
+  // Share via WhatsApp
+  document.getElementById('shareBtn').addEventListener('click', async ()=> {
+    const lines = [];
+    lines.push('Registro de suministros de oxígeno');
+    lines.push('');
+    lines.push('No. | Inicio | Fin | L/min | Min | Costo');
+    lines.push('---------------------------------------------');
+    entries.forEach((entry, i) => {
+      const mins = minutesDiff(entry.startTime, entry.endTime);
+      if(!mins || mins <= 0) return;
+      const cost = calculateCostForEntry(entry);
+      const inicio = entry.startTime ? formatToDisplay(formatTimeValueForInput(entry.startTime)) : '-';
+      const fin = entry.endTime ? formatToDisplay(formatTimeValueForInput(entry.endTime)) : '-';
+      const flow = entry.flowRate || '-';
+      const costStr = cost > 0 ? cost.toFixed(2) : '-';
+      lines.push(\`\${i+1} | \${inicio} | \${fin} | \${flow} | \${mins} | \${costStr}\`);
+    });
+    lines.push('');
+    lines.push('Total a Pagar: $' + calculateTotal().toFixed(2));
+    lines.push('Factor aplicado: ' + paymentFactor + ' (' + insuranceType + ')');
+    const message = lines.join('\\n');
+
+    // Try to open WhatsApp web
+    const waUrl = 'https://wa.me/?text=' + encodeURIComponent(message);
+    // On browsers we can open waUrl in new tab. But prefer navigator.share if available.
+    try{
+      if (navigator.share) {
+        await navigator.share({text: message, title: 'Registro de oxígeno'});
+        return;
+      }
+    }catch(e){
+      // fallback
+    }
+
+    // Attempt to open WhatsApp web
+    window.open(waUrl, '_blank');
+
+    // Also copy to clipboard and inform
+    try{
+      await navigator.clipboard.writeText(message);
+      alert('Mensaje copiado al portapapeles. Puedes pegarlo en WhatsApp si no abre automáticamente.');
+    }catch(e){
+      // ignore
+    }
+  });
+
+  // Utility: updateEntry via id
+  function updateEntryByIndex(index, field, value){
+    if(index < 0 || index >= entries.length) return;
+    const id = entries[index].id;
+    updateEntry(id, field, value);
+  }
+
+  // Allow manual text paste in time cells: double-click to edit raw text (optional)
+  tbody.addEventListener('dblclick', function(ev){
+    const t = ev.target;
+    if(t.classList.contains('time-cell')){
+      const entryId = t.dataset.entryId;
+      const field = t.dataset.field;
+      // prompt for a time string (accept "7:30 AM" or "14:30")
+      const current = entries.find(e=>e.id===entryId)?.[field] || '';
+      const user = prompt('Ingresar hora (ej: 7:30 AM o 14:30):', current ? formatToDisplay(formatTimeValueForInput(current)) : '');
+      if(user !== null){
+        // Attempt to parse user; if contains AM/PM, convert; if HH:MM, store as HH:MM
+        const valForInput = formatTimeValueForInput(user) || user;
+        updateEntry(entryId, field, valForInput || '');
+      }
+    }
+  });
+
+  // Initial render
+  render();
+
+  // Expose for debugging (opcional)
+  window.__oxygenCalc = { getEntries: ()=> entries, setEntries: (v)=> { entries = v; render(); } };
+
+})();
+</script>
 </body>
 </html>
