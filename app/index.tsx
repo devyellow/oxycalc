@@ -2,14 +2,19 @@ import React, { useState, useMemo } from 'react';
 import {
   View,
   Text,
-  StyleSheet,
   ScrollView,
   TouchableOpacity,
   TextInput,
   Platform,
+  Linking,
+  Alert,
+  Share,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import DateTimePicker, { DateTimePickerAndroid } from '@react-native-community/datetimepicker';
+import styles from './styles';
+import TimePickerModal from './TimePickerModal';
 
 type InsuranceType = 'contributivo' | 'subsidiado';
 
@@ -31,17 +36,128 @@ export default function OxygenCalculatorScreen() {
     }));
   });
 
+  const [timePicker, setTimePicker] = useState<{
+    visible: boolean;
+    entryId?: string;
+    field?: keyof OxygenEntry;
+    date?: Date;
+  }>({ visible: false });
+
+  const [webTimePickerVisible, setWebTimePickerVisible] = useState(false);
+  const [webTimePickerDate, setWebTimePickerDate] = useState<Date>(new Date());
+  const [webTimePickerEntry, setWebTimePickerEntry] = useState<{
+    entryId?: string;
+    field?: keyof OxygenEntry;
+  }>({});
+
+  const parseTimeToDate = (time: string) => {
+    const d = new Date();
+    if (!time) return d;
+    let s = time.trim().toUpperCase();
+
+    // Handle 12h format with AM/PM
+    const ampmMatch = /(AM|PM)$/.exec(s);
+    if (ampmMatch) {
+      const ampm = ampmMatch[1];
+      const timePart = s.replace(/\s?(AM|PM)$/i, '').trim();
+      const parts = timePart.split(':');
+      if (parts.length !== 2) return d;
+      let h = parseInt(parts[0], 10);
+      const m = parseInt(parts[1], 10) || 0;
+      if (isNaN(h)) h = 0;
+      if (ampm === 'PM' && h < 12) h += 12;
+      if (ampm === 'AM' && h === 12) h = 0;
+      d.setHours(h);
+      d.setMinutes(m);
+      d.setSeconds(0);
+      d.setMilliseconds(0);
+      return d;
+    }
+
+    // Fallback: accept 24h HH:MM
+    const parts = s.split(':');
+    if (parts.length !== 2) return d;
+    const hours = parseInt(parts[0], 10);
+    const minutes = parseInt(parts[1], 10);
+    if (!isNaN(hours)) d.setHours(hours);
+    if (!isNaN(minutes)) d.setMinutes(minutes);
+    d.setSeconds(0);
+    d.setMilliseconds(0);
+    return d;
+  };
+
+  const formatDateToTime = (date: Date) => {
+    const hours = date.getHours();
+    const mm = String(date.getMinutes()).padStart(2, '0');
+    const ampm = hours >= 12 ? 'PM' : 'AM';
+    let h12 = hours % 12;
+    if (h12 === 0) h12 = 12;
+    return `${h12}:${mm} ${ampm}`;
+  };
+
+  const openTimePicker = (entryId: string, field: keyof OxygenEntry) => {
+    const entry = entries.find((e) => e.id === entryId);
+    const date = entry ? parseTimeToDate(entry[field]) : new Date();
+    // Web: use custom modal picker
+    if (Platform.OS === 'web') {
+      setWebTimePickerDate(date);
+      setWebTimePickerEntry({ entryId, field });
+      setWebTimePickerVisible(true);
+      return;
+    }
+    // On Android use the native dialog helper for more reliable behavior
+    if (Platform.OS === 'android' && DateTimePickerAndroid) {
+      try {
+        DateTimePickerAndroid.open({
+          value: date,
+          onChange: (event, selectedDate) => {
+            // on Android, update directly using the captured entryId/field
+            if (selectedDate) {
+              const formatted = formatDateToTime(selectedDate as Date);
+              updateEntry(entryId, field, formatted);
+            }
+          },
+          mode: 'time',
+          is24Hour: false,
+        });
+        return;
+      } catch (e) {
+        // fallback to showing inline picker
+        console.warn('DateTimePickerAndroid.open failed, falling back to inline picker', e);
+      }
+    }
+
+    setTimePicker({ visible: true, entryId, field, date });
+  };
+
+  const onTimeChange = (_event: any, selectedDate?: Date) => {
+    if (selectedDate && timePicker.entryId && timePicker.field) {
+      const formatted = formatDateToTime(selectedDate);
+      updateEntry(timePicker.entryId, timePicker.field, formatted);
+    }
+    // Close picker after selection or dismissal
+    setTimePicker({ visible: false });
+  };
+
   const paymentFactor = insuranceType === 'contributivo' ? 0.45 : 0.25;
 
   const calculateMinutes = (startTime: string, endTime: string): number => {
     if (!startTime || !endTime) return 0;
-
     const parseTime = (time: string): number | null => {
-      const parts = time.trim().split(':');
-      if (parts.length !== 2) return null;
-      const hours = parseInt(parts[0], 10);
-      const minutes = parseInt(parts[1], 10);
+      if (!time) return null;
+      const s = time.trim().toUpperCase();
+      // Match formats like '7:00 AM', '07:00 AM', '14:30', '14:30 PM' (last is invalid but handled)
+      const m = s.match(/^\s*(\d{1,2}):(\d{2})(?:\s*(AM|PM))?\s*$/i);
+      if (!m) return null;
+      let hours = parseInt(m[1], 10);
+      const minutes = parseInt(m[2], 10);
+      const ampm = m[3];
       if (isNaN(hours) || isNaN(minutes)) return null;
+      if (ampm) {
+        // Convert 12h to 24h
+        if (ampm === 'PM' && hours < 12) hours += 12;
+        if (ampm === 'AM' && hours === 12) hours = 0;
+      }
       if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return null;
       return hours * 60 + minutes;
     };
@@ -71,6 +187,51 @@ export default function OxygenCalculatorScreen() {
     return entries.reduce((sum, entry) => sum + calculateCost(entry), 0);
   }, [entries, calculateCost]);
 
+  const buildShareMessage = () => {
+    const lines: string[] = [];
+    lines.push('Registro de suministros de oxígeno');
+    lines.push('');
+    // Header row
+    lines.push('No. | Inicio | Fin | L/min | Min | Costo');
+    lines.push('---------------------------------------------');
+    entries.forEach((entry, i) => {
+      // Include only rows with minutes > 0
+      const mins = calculateMinutes(entry.startTime, entry.endTime);
+      if (!mins || mins <= 0) return;
+      const cost = calculateCost(entry);
+      const inicio = entry.startTime || '-';
+      const fin = entry.endTime || '-';
+      const flow = entry.flowRate || '-';
+      const costStr = cost > 0 ? cost.toFixed(2) : '-';
+      lines.push(`${i + 1} | ${inicio} | ${fin} | ${flow} | ${mins} | ${costStr}`);
+    });
+    lines.push('');
+    lines.push(`Total a Pagar: $${totalCost.toFixed(2)}`);
+    lines.push(`Factor aplicado: ${paymentFactor} (${insuranceType})`);
+    return lines.join('\n');
+  };
+
+  const shareViaWhatsApp = async () => {
+    const msg = buildShareMessage();
+    const url = `whatsapp://send?text=${encodeURIComponent(msg)}`;
+    try {
+      const supported = await Linking.canOpenURL(url);
+      if (supported) {
+        await Linking.openURL(url);
+        return;
+      }
+    } catch (e) {
+      // ignore and fallback
+    }
+
+    // Fallback: use generic Share API
+    try {
+      await Share.share({ message: msg });
+    } catch (e) {
+      Alert.alert('No se pudo compartir', 'Asegúrate de tener WhatsApp instalado o copia el texto manualmente.');
+    }
+  };
+
   const addEntry = () => {
     setEntries([
       ...entries,
@@ -90,11 +251,16 @@ export default function OxygenCalculatorScreen() {
   };
 
   const updateEntry = (id: string, field: keyof OxygenEntry, value: string) => {
-    setEntries(
-      entries.map((entry) =>
-        entry.id === id ? { ...entry, [field]: value } : entry
-      )
-    );
+    setEntries((prev) => {
+      const idx = prev.findIndex((e) => e.id === id);
+      if (idx === -1) return prev;
+      const next = prev[idx + 1];
+      const updated = prev.map((entry, i) => (i === idx ? { ...entry, [field]: value } : entry));
+      if (field === 'endTime' && next && !next.startTime) {
+        updated[idx + 1] = { ...next, startTime: value };
+      }
+      return updated;
+    });
   };
 
   return (
@@ -179,61 +345,79 @@ export default function OxygenCalculatorScreen() {
             </TouchableOpacity>
           </View>
 
-          <View style={styles.tableHeader}>
-            <Text style={[styles.tableHeaderText, { width: 30 }]}>#</Text>
-            <Text style={[styles.tableHeaderText, { width: 70 }]}>Inicio</Text>
-            <Text style={[styles.tableHeaderText, { width: 70 }]}>Fin</Text>
-            <Text style={[styles.tableHeaderText, { width: 55 }]}>L/min</Text>
-            <Text style={[styles.tableHeaderText, { flex: 1 }]}>Min</Text>
-            <Text style={[styles.tableHeaderText, { flex: 1 }]}>Costo</Text>
-            <View style={{ width: 40 }} />
-          </View>
-
-          {entries.map((entry, index) => {
-            const minutes = calculateMinutes(entry.startTime, entry.endTime);
-            const cost = calculateCost(entry);
-            return (
-              <View key={entry.id} style={styles.tableRow}>
-                <Text style={[styles.rowNumber, { width: 30 }]}>{index + 1}</Text>
-                <TextInput
-                  style={[styles.input, { width: 70 }]}
-                  placeholder="HH:MM"
-                  placeholderTextColor="#999"
-                  value={entry.startTime}
-                  onChangeText={(value) => updateEntry(entry.id, 'startTime', value)}
-                  keyboardType={Platform.OS === 'ios' ? 'numbers-and-punctuation' : 'default'}
-                />
-                <TextInput
-                  style={[styles.input, { width: 70 }]}
-                  placeholder="HH:MM"
-                  placeholderTextColor="#999"
-                  value={entry.endTime}
-                  onChangeText={(value) => updateEntry(entry.id, 'endTime', value)}
-                  keyboardType={Platform.OS === 'ios' ? 'numbers-and-punctuation' : 'default'}
-                />
-                <TextInput
-                  style={[styles.input, { width: 55 }]}
-                  placeholder="0.0"
-                  placeholderTextColor="#999"
-                  value={entry.flowRate}
-                  onChangeText={(value) => updateEntry(entry.id, 'flowRate', value)}
-                  keyboardType="decimal-pad"
-                />
-                <Text style={[styles.calculatedValue, { flex: 1 }]}>
-                  {minutes > 0 ? minutes : '-'}
-                </Text>
-                <Text style={[styles.calculatedValue, { flex: 1 }]}>
-                  {cost > 0 ? `${cost.toFixed(2)}` : '-'}
-                </Text>
-                <TouchableOpacity
-                  style={styles.deleteButton}
-                  onPress={() => removeEntry(entry.id)}
-                >
-                  <MaterialCommunityIcons name="delete" size={18} color="#EF4444" />
-                </TouchableOpacity>
+          <ScrollView
+            horizontal={true}
+            showsHorizontalScrollIndicator={true}
+            style={styles.tableScroll}
+            contentContainerStyle={styles.tableInner}
+          >
+            <View>
+              <View style={styles.tableHeader}>
+                <Text style={[styles.tableHeaderText, { width: 30 }]}>#</Text>
+                <Text style={[styles.tableHeaderText, { width: 90 }]}>Inicio</Text>
+                <Text style={[styles.tableHeaderText, { width: 90 }]}>Fin</Text>
+                <Text style={[styles.tableHeaderText, { width: 55 }]}>L/min</Text>
+                <Text style={[styles.tableHeaderText, { width: 80 }]}>Min</Text>
+                <Text style={[styles.tableHeaderText, { width: 80 }]}>Costo</Text>
+                <View style={{ width: 40 }} />
               </View>
-            );
-          })}
+
+              {entries.map((entry, index) => {
+                const minutes = calculateMinutes(entry.startTime, entry.endTime);
+                const cost = calculateCost(entry);
+                return (
+                  <View key={entry.id} style={styles.tableRow}>
+                    <Text style={[styles.rowNumber, { width: 30 }]}>{index + 1}</Text>
+                    <TouchableOpacity
+                      style={[styles.inputFixed, { width: 90 }]}
+                      onPress={() => openTimePicker(entry.id, 'startTime')}
+                    >
+                      <Text style={{ color: entry.startTime ? '#1E293B' : '#999', textAlign: 'center' }}>
+                        {entry.startTime || 'HH:MM'}
+                      </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.inputFixed, { width: 90 }]}
+                      onPress={() => openTimePicker(entry.id, 'endTime')}
+                    >
+                      <Text style={{ color: entry.endTime ? '#1E293B' : '#999', textAlign: 'center' }}>
+                        {entry.endTime || 'HH:MM'}
+                      </Text>
+                    </TouchableOpacity>
+                    <TextInput
+                      style={[styles.inputFixed, { width: 55 }]}
+                      placeholder="0.0"
+                      placeholderTextColor="#999"
+                      value={entry.flowRate}
+                      onChangeText={(value) => updateEntry(entry.id, 'flowRate', value)}
+                      keyboardType="decimal-pad"
+                    />
+                    <Text style={[styles.calculatedValue, { width: 80 }]}> 
+                      {minutes > 0 ? minutes : '-'}
+                    </Text>
+                    <Text style={[styles.calculatedValue, { width: 80 }]}> 
+                      {cost > 0 ? `${cost.toFixed(2)}` : '-'}
+                    </Text>
+                    <TouchableOpacity
+                      style={styles.deleteButton}
+                      onPress={() => removeEntry(entry.id)}
+                    >
+                      <MaterialCommunityIcons name="delete" size={18} color="#D32F2F" />
+                    </TouchableOpacity>
+                  </View>
+                );
+              })}
+            </View>
+          </ScrollView>
+          {timePicker.visible && (
+            <DateTimePicker
+              value={timePicker.date || new Date()}
+              mode="time"
+              is24Hour={false}
+              display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+              onChange={onTimeChange}
+            />
+          )}
         </View>
 
         <View style={styles.totalSection}>
@@ -243,199 +427,30 @@ export default function OxygenCalculatorScreen() {
             <Text style={styles.totalInfo}>
               Factor aplicado: {paymentFactor} ({insuranceType})
             </Text>
+            <TouchableOpacity style={styles.shareButton} onPress={shareViaWhatsApp}>
+              <MaterialCommunityIcons name="whatsapp" size={18} color="#FFFFFF" />
+              <Text style={styles.shareButtonText}>Compartir por WhatsApp</Text>
+            </TouchableOpacity>
           </View>
         </View>
 
         <View style={{ height: 40 }} />
       </ScrollView>
+
+      <TimePickerModal
+        visible={webTimePickerVisible}
+        value={webTimePickerDate}
+        onConfirm={(selectedDate) => {
+          const formatted = formatDateToTime(selectedDate);
+          if (webTimePickerEntry.entryId && webTimePickerEntry.field) {
+            updateEntry(webTimePickerEntry.entryId, webTimePickerEntry.field, formatted);
+          }
+          setWebTimePickerVisible(false);
+        }}
+        onCancel={() => setWebTimePickerVisible(false)}
+      />
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#F8FAFC',
-  },
-  header: {
-    backgroundColor: '#0F766E',
-    paddingBottom: 24,
-  },
-  safeArea: {
-    backgroundColor: 'transparent',
-  },
-  headerContent: {
-    paddingHorizontal: 20,
-    paddingTop: 8,
-  },
-  titleContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  headerTitle: {
-    fontSize: 24,
-    fontWeight: '700' as const,
-    color: '#FFFFFF',
-  },
-  headerSubtitle: {
-    fontSize: 14,
-    color: '#CCFBF1',
-    marginTop: 4,
-  },
-  content: {
-    flex: 1,
-  },
-  section: {
-    padding: 20,
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: '600' as const,
-    color: '#1E293B',
-    marginBottom: 12,
-  },
-  insuranceButtons: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  insuranceButton: {
-    flex: 1,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    padding: 16,
-    borderWidth: 2,
-    borderColor: '#E2E8F0',
-    alignItems: 'center',
-  },
-  insuranceButtonActive: {
-    backgroundColor: '#0F766E',
-    borderColor: '#0F766E',
-  },
-  insuranceButtonText: {
-    fontSize: 16,
-    fontWeight: '600' as const,
-    color: '#334155',
-    marginBottom: 4,
-  },
-  insuranceButtonTextActive: {
-    color: '#FFFFFF',
-  },
-  insuranceButtonFactor: {
-    fontSize: 12,
-    color: '#64748B',
-  },
-  insuranceButtonFactorActive: {
-    color: '#CCFBF1',
-  },
-  addButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#0F766E',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 8,
-    gap: 6,
-  },
-  addButtonText: {
-    fontSize: 14,
-    fontWeight: '600' as const,
-    color: '#FFFFFF',
-  },
-  tableHeader: {
-    flexDirection: 'row',
-    backgroundColor: '#FFFFFF',
-    paddingVertical: 12,
-    paddingHorizontal: 12,
-    borderRadius: 8,
-    marginBottom: 8,
-    alignItems: 'center',
-    gap: 8,
-  },
-  tableHeaderText: {
-    fontSize: 12,
-    fontWeight: '700' as const,
-    color: '#475569',
-    textAlign: 'center',
-  },
-  tableRow: {
-    flexDirection: 'row',
-    backgroundColor: '#FFFFFF',
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 8,
-    marginBottom: 8,
-    alignItems: 'center',
-    gap: 8,
-  },
-  rowNumber: {
-    fontSize: 14,
-    fontWeight: '600' as const,
-    color: '#64748B',
-    textAlign: 'center',
-  },
-  input: {
-    backgroundColor: '#F8FAFC',
-    borderRadius: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 8,
-    fontSize: 14,
-    color: '#1E293B',
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-    textAlign: 'center',
-  },
-  calculatedValue: {
-    fontSize: 14,
-    fontWeight: '500' as const,
-    color: '#0F766E',
-    textAlign: 'center',
-  },
-  deleteButton: {
-    width: 40,
-    height: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  totalSection: {
-    paddingHorizontal: 20,
-    paddingTop: 8,
-  },
-  totalCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    padding: 24,
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 4,
-    borderWidth: 2,
-    borderColor: '#0F766E',
-  },
-  totalLabel: {
-    fontSize: 14,
-    fontWeight: '600' as const,
-    color: '#64748B',
-    textTransform: 'uppercase' as const,
-    letterSpacing: 0.5,
-  },
-  totalAmount: {
-    fontSize: 40,
-    fontWeight: '700' as const,
-    color: '#0F766E',
-    marginTop: 8,
-  },
-  totalInfo: {
-    fontSize: 13,
-    color: '#64748B',
-    marginTop: 8,
-  },
-});
+
